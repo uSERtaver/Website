@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Steampunk Gift Quest</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none}
+html,body{width:100%;height:100dvh;overflow:hidden;background:#18120a;font-family:Georgia,'Palatino Linotype','Book Antiqua',Palatino,serif}
+#app{width:100%;height:100%}
+/* Vignette — GPU-composited layer */
+#app::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse at center,transparent 45%,rgba(0,0,0,0.5) 100%);pointer-events:none;z-index:999;will-change:transform;transform:translateZ(0)}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:.8;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}
+/* breathe: GPU-only — uses transform+opacity instead of box-shadow */
+@keyframes breathe{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.015);opacity:0.92}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes coinBounce{0%{transform:scale(0) rotate(-90deg);opacity:0}40%{transform:scale(1.4) rotate(0);opacity:1}100%{transform:scale(0) translateY(-80px);opacity:0}}
+@keyframes safeOpen{from{transform:scale(.5) rotate(-8deg);opacity:0}to{transform:scale(1) rotate(0);opacity:1}}
+@keyframes starsIn{from{opacity:0;transform:scale(0.5)}to{opacity:0.7;transform:scale(1)}}
+@keyframes shake{0%,100%{transform:translateX(0)}10%{transform:translateX(-4px) rotate(-0.5deg)}30%{transform:translateX(3px) rotate(0.3deg)}50%{transform:translateX(-2px)}70%{transform:translateX(2px)}90%{transform:translateX(-1px)}}
+@keyframes hintFade{0%{opacity:0;transform:scale(0.8)}10%{opacity:1;transform:scale(1)}80%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(0.95)}}
+/* flowPulse: GPU-only — opacity pulse instead of box-shadow */
+@keyframes flowPulse{0%,100%{opacity:0.85}50%{opacity:1}}
+/* keyGlow: GPU-only — opacity instead of filter:drop-shadow */
+@keyframes keyGlow{0%,100%{opacity:0.6}50%{opacity:1}}
+@keyframes floatDust{0%{transform:translate3d(0,90vh,0);opacity:0}8%{opacity:0.5}85%{opacity:0.2}100%{transform:translate3d(25px,-5vh,0);opacity:0}}
+@keyframes flicker{0%,100%{opacity:1;transform:scale(1)}30%{opacity:0.82;transform:scale(0.97)}50%{opacity:0.93;transform:scale(1.02)}70%{opacity:0.86}}
+.pipe-svg{transition:transform 0.15s cubic-bezier(0.4,0,0.2,1);will-change:transform}
+.seq-btn{transition:background 0.15s,border-color 0.15s,opacity 0.15s}
+.progress-fill{transition:width 0.8s cubic-bezier(0.4,0,0.2,1)}
+.safe-box{transition:transform 0.5s}
+.pipe-cell{transition:border-color 0.15s,background 0.15s}
+.pipe-cell-flow{border-color:#B8962A !important;background:rgba(255,215,0,0.08) !important;animation:flowPulse 2s ease-in-out infinite}
+.pipe-cell-fixed{cursor:default !important;border-style:double !important;border-width:3px !important}
+.gear-dot{transition:transform 0.3s ease}
+#maze-robot{transition:transform 0.1s ease-out;will-change:transform}
+.mz-cell{transition:background 0.15s ease;contain:layout style}
+.mz-wall{transition:opacity 0.15s ease}
+#maze-grid{touch-action:none;contain:layout style paint}
+/* goalPulse: GPU-only — transform instead of box-shadow */
+@keyframes goalPulse{0%,100%{transform:scale(1);opacity:0.6}50%{transform:scale(1.15);opacity:1}}
+.goal-pulse{animation:goalPulse 0.6s ease-in-out 3 !important}
+/* Rich button press feedback */
+.game-btn{transition:transform 0.1s ease,filter 0.1s ease;box-shadow:2px 3px 8px rgba(0,0,0,0.5),inset 1px 1px 3px rgba(255,220,150,0.12),inset -1px -1px 3px rgba(0,0,0,0.3)}
+.game-btn:active{transform:translateY(2px) scale(0.96)!important;filter:brightness(0.88);transition-duration:0.04s}
+/* Dust particles — GPU-composited */
+.dust{position:absolute;border-radius:50%;background:rgba(255,210,130,0.35);pointer-events:none;animation:floatDust var(--dur,14s) var(--delay,0s) linear infinite;will-change:transform,opacity}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function(){
+"use strict";
+
+const C={rust:"#A07818",darkRust:"#7A5520",brass:"#D4B46A",copper:"#CC8844",darkMetal:"#352E22",metal:"#5A4C36",lightMetal:"#7D6D50",glow:"#FFD700",glowDim:"#CC9900",rivet:"#8D7D5F",panelBg:"#453828",success:"#6CD06C",fail:"#DD5555",pipe:"#B08D5F",pipeIn:"#7D6040",steam:"#E0D4B0"};
+
+/* ── Pipe Levels ── */
+const PIPE_LEVELS=[
+  {rows:3,cols:4,srcRow:1,dstRow:1,fixed:new Set(["1,0","2,3"]),grid:[
+    [{t:'e',r:1},{t:'s',r:1},{t:'t',r:1},{t:'d',r:3}],
+    [{t:'t',r:2},{t:'d',r:2},{t:'e',r:0},{t:'t',r:1}],
+    [{t:'e',r:0},{t:'t',r:3},{t:'d',r:3},{t:'d',r:0}]]},
+  {rows:4,cols:4,srcRow:1,dstRow:2,fixed:new Set(["1,0"]),grid:[
+    [{t:'e',r:1},{t:'s',r:1},{t:'s',r:1},{t:'e',r:2}],
+    [{t:'t',r:2},{t:'d',r:2},{t:'e',r:1},{t:'e',r:3}],
+    [{t:'s',r:0},{t:'s',r:0},{t:'e',r:0},{t:'t',r:1}],
+    [{t:'e',r:0},{t:'e',r:3},{t:'d',r:1},{t:'e',r:3}]]},
+  {rows:5,cols:5,srcRow:0,dstRow:2,fixed:new Set(),grid:[
+    [{t:'t',r:1},{t:'s',r:1},{t:'t',r:1},{t:'s',r:1},{t:'e',r:2}],
+    [{t:'s',r:0},null,{t:'e',r:0},{t:'d',r:3},{t:'s',r:0}],
+    [{t:'e',r:0},{t:'s',r:1},{t:'d',r:3},null,{t:'t',r:0}],
+    [{t:'d',r:2},null,{t:'e',r:1},{t:'d',r:3},{t:'s',r:0}],
+    [{t:'e',r:0},{t:'s',r:1},{t:'t',r:3},{t:'s',r:1},{t:'e',r:3}]]}
+];
+const GEAR_LEVELS=[
+  {n:4,adj:[[0,1],[1,2],[2,3]],start:[2,2,1,3],pos:[[0,0],[1,0],[2,0],[3,0]],cols:4,rows:1},
+  {n:5,adj:[[0,2],[1,2],[2,3],[2,4]],start:[3,3,3,2,3],pos:[[0,1],[1,0],[1,1],[2,1],[1,2]],cols:3,rows:3},
+  {n:6,adj:[[0,1],[0,2],[1,3],[2,3],[2,4],[3,5],[4,5]],start:[1,1,3,1,3,3],pos:[[0,0],[1,0],[0,1],[1,1],[0,2],[1,2]],cols:2,rows:3}
+];
+const SEQ_LEVELS=[
+  {grid:9,cols:3,seq:[0,4,8,6]},
+  {grid:12,cols:4,seq:[0,5,7,2,11]},
+  {grid:16,cols:4,seq:[0,5,10,15,12,9,3]}
+];
+
+/* ── Maze: Procedural Generation with Fog of War ──
+   Configurable difficulty levels. Recursive Backtracking (DFS) produces
+   long corridors and rich dead-end structure. Fog of war forces exploration.
+*/
+const W_T=1,W_R=2,W_B=4,W_L=8;
+const MAZE_LEVELS=[
+  {rows:9, cols:9, vis:2,deadEndExtend:2}, /* Easy-medium */
+  {rows:11,cols:11,vis:2,deadEndExtend:3}, /* Hard */
+  {rows:13,cols:11,vis:1,deadEndExtend:4}  /* Very hard: big, nearly blind */
+];
+let mazeGrid=null,mazeRows=0,mazeCols=0,mazeExit=[0,0],mazeKeyPos=[0,0];
+
+/* Generate maze: DFS + dead-end extension for longer false corridors.
+   deadEndExtend controls how many extra wall-removals extend dead ends. */
+function generateMaze(rows,cols,deadEndExtend){
+  const g=Array.from({length:rows},()=>Array(cols).fill(15));
+  const vis=Array.from({length:rows},()=>Array(cols).fill(false));
+  const stack=[[0,0]];vis[0][0]=true;
+  const dirs=[[-1,0,W_T,W_B],[0,1,W_R,W_L],[1,0,W_B,W_T],[0,-1,W_L,W_R]];
+  /* Phase 1: standard DFS carving */
+  while(stack.length){
+    const[r,c]=stack[stack.length-1];const nb=[];
+    for(const[dr,dc,wf,wt]of dirs){const nr=r+dr,nc=c+dc;if(nr>=0&&nr<rows&&nc>=0&&nc<cols&&!vis[nr][nc])nb.push([nr,nc,wf,wt]);}
+    if(!nb.length)stack.pop();
+    else{const[nr,nc,wf,wt]=nb[Math.floor(Math.random()*nb.length)];g[r][c]&=~wf;g[nr][nc]&=~wt;vis[nr][nc]=true;stack.push([nr,nc]);}
+  }
+  /* Phase 2: find dead ends and extend them by carving extra passages
+     into adjacent dead ends, creating longer misleading corridors */
+  for(let pass=0;pass<(deadEndExtend||0);pass++){
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+      /* A dead end has exactly 1 opening */
+      let openCount=0;
+      if(!(g[r][c]&W_T))openCount++;if(!(g[r][c]&W_R))openCount++;
+      if(!(g[r][c]&W_B))openCount++;if(!(g[r][c]&W_L))openCount++;
+      if(openCount!==1)continue;
+      /* Try to extend into a neighbor that is ALSO a dead end (creates longer corridor) */
+      const shuffled=[...dirs].sort(()=>Math.random()-0.5);
+      for(const[dr,dc,wf,wt]of shuffled){
+        const nr=r+dr,nc=c+dc;
+        if(nr<0||nr>=rows||nc<0||nc>=cols)continue;
+        if(!(g[r][c]&wf))continue; /* wall must exist to carve */
+        let nOpen=0;
+        if(!(g[nr][nc]&W_T))nOpen++;if(!(g[nr][nc]&W_R))nOpen++;
+        if(!(g[nr][nc]&W_B))nOpen++;if(!(g[nr][nc]&W_L))nOpen++;
+        if(nOpen<=2){g[r][c]&=~wf;g[nr][nc]&=~wt;break;}
+      }
+    }
+  }
+  return g;
+}
+
+/* BFS to find the cell farthest from a given cell (maximizes key backtrack) */
+function findFarthest(grid,rows,cols,sr,sc){
+  const dist=Array.from({length:rows},()=>Array(cols).fill(-1));
+  const q=[[sr,sc]];dist[sr][sc]=0;let far=[sr,sc],mx=0;
+  const dirs=[[-1,0,W_T],[0,1,W_R],[1,0,W_B],[0,-1,W_L]];
+  while(q.length){const[r,c]=q.shift();for(const[dr,dc,wb]of dirs){const nr=r+dr,nc=c+dc;
+    if(nr>=0&&nr<rows&&nc>=0&&nc<cols&&dist[nr][nc]===-1&&!(grid[r][c]&wb)){dist[nr][nc]=dist[r][c]+1;q.push([nr,nc]);if(dist[nr][nc]>mx){mx=dist[nr][nc];far=[nr,nc];}}}}
+  return far;
+}
+
+/* Reveal cells within Chebyshev radius around (r,c) */
+function revealCells(r,c,rad){
+  const lvl=MAZE_LEVELS[S.mazeLvl];
+  for(let dr=-rad;dr<=rad;dr++)for(let dc=-rad;dc<=rad;dc++){
+    const nr=r+dr,nc=c+dc;
+    if(nr>=0&&nr<lvl.rows&&nc>=0&&nc<lvl.cols)S.mazeVisited.add(nr+","+nc);
+  }
+}
+
+function isVis(r,c){const lvl=MAZE_LEVELS[S.mazeLvl];return Math.max(Math.abs(r-S.mazeRobot.r),Math.abs(c-S.mazeRobot.c))<=lvl.vis;}
+
+/* ── State ── */
+const S={
+  screen:"main",progress:0,pLvl:[0,0,0],safeOpen:false,celebAnim:false,
+  pipeGrid:null,pipeDone:false,pipeFlow:new Set(),pipeHint:false,
+  gears:[],gearDone:false,
+  seqPhase:"watch",seqHi:-1,seqInput:[],seqFail:false,seqDone:false,
+  mazeLvl:0,mazePhase:"navigate",mazeRobot:{r:0,c:0},mazeHasKey:false,mazeKeyVisible:false,mazeDoorOpen:true,mazeAnimating:false,mazeComplete:false,mazeVisited:new Set()
+};
+function saveProgress(){try{sessionStorage.setItem('sq_progress',JSON.stringify({progress:S.progress,pLvl:S.pLvl,safeOpen:S.safeOpen,mazeComplete:S.mazeComplete,mazeLvl:S.mazeLvl}));}catch(e){}}
+(function(){try{const d=JSON.parse(sessionStorage.getItem('sq_progress'));if(d){S.progress=d.progress||0;S.pLvl=d.pLvl||[0,0,0];S.safeOpen=d.safeOpen||false;S.mazeComplete=d.mazeComplete||false;S.mazeLvl=d.mazeLvl||0;}}catch(e){}})();
+let timers=[];
+function setT(fn,ms){const id=setTimeout(()=>{timers=timers.filter(t=>t!==id);fn();},ms);timers.push(id);return id;}
+function clearAllTimers(){timers.forEach(clearTimeout);timers=[];}
+const totalLevels=9;
+
+/* ── Helpers ── */
+const $=s=>document.querySelector(s);
+const $$=s=>document.querySelectorAll(s);
+const app=()=>document.getElementById("app");
+function pct(){return Math.round(S.progress/totalLevels*100)}
+function haptic(ms){if(navigator.vibrate)navigator.vibrate(ms);}
+let audioCtx=null;
+function playSound(type){
+  try{if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==="suspended")audioCtx.resume();
+  const t=audioCtx.currentTime,g=audioCtx.createGain();g.connect(audioCtx.destination);
+  if(type==="click"){const o=audioCtx.createOscillator();o.type="square";o.frequency.setValueAtTime(800,t);o.frequency.exponentialRampToValueAtTime(200,t+0.08);g.gain.setValueAtTime(0.08,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.1);o.connect(g);o.start(t);o.stop(t+0.1);}
+  else if(type==="gear"){const o=audioCtx.createOscillator();o.type="triangle";o.frequency.setValueAtTime(120,t);o.frequency.exponentialRampToValueAtTime(60,t+0.15);g.gain.setValueAtTime(0.12,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.15);o.connect(g);o.start(t);o.stop(t+0.15);const o2=audioCtx.createOscillator(),g2=audioCtx.createGain();o2.type="square";o2.frequency.setValueAtTime(1200,t);o2.frequency.exponentialRampToValueAtTime(400,t+0.05);g2.gain.setValueAtTime(0.04,t);g2.gain.exponentialRampToValueAtTime(0.001,t+0.06);o2.connect(g2);g2.connect(audioCtx.destination);o2.start(t);o2.stop(t+0.06);}
+  else if(type==="success"){[0,0.12].forEach((d,i)=>{const o=audioCtx.createOscillator(),gg=audioCtx.createGain();o.type="sine";o.frequency.setValueAtTime([523,784][i],t+d);gg.gain.setValueAtTime(0.1,t+d);gg.gain.exponentialRampToValueAtTime(0.001,t+d+0.4);o.connect(gg);gg.connect(audioCtx.destination);o.start(t+d);o.stop(t+d+0.4);});}
+  else if(type==="fail"){const o=audioCtx.createOscillator();o.type="sawtooth";o.frequency.setValueAtTime(110,t);g.gain.setValueAtTime(0.08,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.3);o.connect(g);o.start(t);o.stop(t+0.3);}
+  else if(type==="door"){const o=audioCtx.createOscillator();o.type="triangle";o.frequency.setValueAtTime(80,t);o.frequency.linearRampToValueAtTime(40,t+0.5);g.gain.setValueAtTime(0.15,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.5);o.connect(g);o.start(t);o.stop(t+0.5);}
+  else if(type==="key"){[0,0.06,0.12].forEach((d,i)=>{const o=audioCtx.createOscillator(),gg=audioCtx.createGain();o.type="sine";o.frequency.setValueAtTime([660,880,1320][i],t+d);gg.gain.setValueAtTime(0.08,t+d);gg.gain.exponentialRampToValueAtTime(0.001,t+d+0.25);o.connect(gg);gg.connect(audioCtx.destination);o.start(t+d);o.stop(t+d+0.25);});}
+  else if(type==="wall"){const o=audioCtx.createOscillator();o.type="triangle";o.frequency.setValueAtTime(100,t);g.gain.setValueAtTime(0.06,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.06);o.connect(g);o.start(t);o.stop(t+0.06);}
+  }catch(e){}
+}
+
+/* ── Pipe Logic ── */
+function getOpenings(t,r){const base=t==="s"?[0,2]:t==="e"?[0,1]:t==="t"?[0,1,2]:t==="d"?[0]:[];return base.map(d=>(d+r)%4);}
+function computeFlow(grid,srcRow){const R=grid.length,Co=grid[0].length,flow=new Set(),q=[];if(srcRow!=null){const c=grid[srcRow][0];if(c&&getOpenings(c.t,c.cr).includes(3)){q.push([srcRow,0]);flow.add(srcRow+",0");}}else{for(let r=0;r<R;r++){const c=grid[r][0];if(c&&getOpenings(c.t,c.cr).includes(3)){q.push([r,0]);flow.add(r+",0");}}}const ds=[[-1,0,0],[0,1,1],[1,0,2],[0,-1,3]];while(q.length){const[cr,cc]=q.shift();for(const[dr,dc,dir]of ds){const nr=cr+dr,nc=cc+dc;if(nr>=0&&nr<R&&nc>=0&&nc<Co&&!flow.has(nr+","+nc)){const c1=grid[cr][cc],c2=grid[nr][nc];if(c2&&getOpenings(c1.t,c1.cr).includes(dir)&&getOpenings(c2.t,c2.cr).includes((dir+2)%4)){flow.add(nr+","+nc);q.push([nr,nc]);}}}}return flow;}
+function isPipeSolved(li,grid){const lv=PIPE_LEVELS[li];for(let r=0;r<lv.rows;r++)for(let c=0;c<lv.cols;c++){const cl=grid[r][c];if(!cl)continue;if(cl.t==='s'){if(cl.cr%2!==cl.r%2)return false;}else{if(cl.cr!==cl.r)return false;}}return true;}
+function scramblePipeGrid(li){const lv=PIPE_LEVELS[li];const g=lv.grid.map((row,ri)=>row.map((cl,ci)=>{if(!cl)return null;const f=lv.fixed.has(ri+","+ci);if(f)return{t:cl.t,r:cl.r,cr:cl.r,fixed:true};let cr;if(cl.t==='s')cr=(cl.r+1)%4;else cr=(cl.r+1+Math.floor(Math.random()*3))%4;return{t:cl.t,r:cl.r,cr,fixed:false};}));if(isPipeSolved(li,g))return scramblePipeGrid(li);return g;}
+
+/* ── Gear Logic ── */
+function getGearNeighbors(lv){const nb=Array.from({length:lv.n},(_,i)=>[i]);for(const[a,b]of lv.adj){nb[a].push(b);nb[b].push(a);}return nb;}
+function isGearSolved(g){return g.every(v=>v===0);}
+
+/* ── SVG Snippets ── */
+function ambientGearSVG(s,cx,cy,sp,color){let t="";for(let i=0;i<8;i++)t+=`<rect x="${cx-3}" y="${cy-s/2}" width="6" height="${s}" rx="2" fill="${color}" transform="rotate(${i*45} ${cx} ${cy})" opacity="0.6"/>`;return`<g style="transform-origin:${cx}px ${cy}px;animation:spin ${sp}s linear infinite">${t}<circle cx="${cx}" cy="${cy}" r="${s*0.35}" fill="${color}" stroke="${C.darkMetal}" stroke-width="2"/><circle cx="${cx}" cy="${cy}" r="${s*0.12}" fill="${C.darkMetal}"/></g>`;}
+function rivetSVG(x,y,s){s=s||5;return`<circle cx="${x}" cy="${y}" r="${s}" fill="${C.rivet}"/><circle cx="${x-1}" cy="${y-1}" r="${s*0.35}" fill="${C.brass}" opacity="0.4"/>`;}
+function pipeCellSVG(type,ri,ci){const seed=(ri*7+ci*13)%5,rustOp=[0.08,0.12,0.06,0.1,0.14][seed],rustY=[5,20,35,10,40][seed];const rust=`<rect x="10" y="${rustY}" width="20" height="12" rx="4" fill="${C.darkRust}" opacity="${rustOp}"/>`;if(type==="s")return`<rect x="22" y="0" width="16" height="60" rx="3" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="1"/><rect x="26" y="0" width="8" height="60" fill="${C.pipeIn}" opacity="0.35"/>${rust}<circle cx="30" cy="15" r="2" fill="${C.darkRust}" opacity="0.3"/><circle cx="30" cy="45" r="2" fill="${C.darkRust}" opacity="0.3"/>`;if(type==="e")return`<rect x="22" y="0" width="16" height="38" rx="3" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="1"/><rect x="22" y="22" width="38" height="16" rx="3" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="1"/><circle cx="30" cy="30" r="9" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="1"/><rect x="26" y="0" width="8" height="30" fill="${C.pipeIn}" opacity="0.3"/><rect x="30" y="26" width="30" height="8" fill="${C.pipeIn}" opacity="0.3"/>${rivetSVG(30,30,2.5)}${rust}`;if(type==="t")return`<rect x="22" y="0" width="16" height="60" rx="3" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="1"/><rect x="22" y="22" width="38" height="16" rx="3" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="1"/><circle cx="30" cy="30" r="9" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="1"/><circle cx="30" cy="30" r="3" fill="${C.darkRust}"/>${rivetSVG(30,30,2)}${rust}`;if(type==="d")return`<rect x="22" y="0" width="16" height="34" rx="3" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="1"/><rect x="26" y="0" width="8" height="28" fill="${C.pipeIn}" opacity="0.35"/><rect x="18" y="29" width="24" height="8" rx="3" fill="${C.darkRust}"/><rect x="20" y="30" width="20" height="6" rx="2" fill="${C.rust}"/><circle cx="30" cy="33" r="4" fill="none" stroke="${C.brass}" stroke-width="1.5"/><circle cx="30" cy="33" r="1.2" fill="${C.brass}"/>${rust}`;return"";}
+function puzzleGearSVG(pos,size,done){const r=size*0.42,da=pos*90;let teeth="";for(let i=0;i<8;i++)teeth+=`<rect x="${size/2-3}" y="${size/2-r-4}" width="6" height="8" rx="2" fill="${done?C.success:C.copper}" transform="rotate(${i*45} ${size/2} ${size/2})" stroke="${C.darkRust}" stroke-width="0.5"/>`;const dx=size/2+Math.sin(da*Math.PI/180)*(r-8),dy=size/2-Math.cos(da*Math.PI/180)*(r-8);return`<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${teeth}<circle cx="${size/2}" cy="${size/2}" r="${r}" fill="${done?'rgba(92,191,92,0.15)':C.metal}" stroke="${done?C.success:C.darkRust}" stroke-width="2"/><circle cx="${size/2}" cy="${size/2}" r="${r*0.55}" fill="${C.darkMetal}" stroke="${C.darkRust}" stroke-width="1.5"/><circle cx="${size/2}" cy="${size/2}" r="${r*0.18}" fill="${C.rivet}"/><circle cx="${dx}" cy="${dy}" r="5" fill="${pos===0?C.success:C.glow}" stroke="${C.darkRust}" stroke-width="1">${pos===0&&done?`<animate attributeName="opacity" values="0.7;1;0.7" dur="1.5s" repeatCount="indefinite"/>`:""}</circle>${pos===0?`<circle cx="${dx}" cy="${dy}" r="8" fill="${C.success}" opacity="0.2"/>`:""}</svg>`;}
+function robotSVG(sz){return`<svg viewBox="0 0 40 40" width="${sz}" height="${sz}"><line x1="20" y1="4" x2="20" y2="10" stroke="${C.copper}" stroke-width="1.5"/><circle cx="20" cy="3" r="2.5" fill="${C.glow}"><animate attributeName="opacity" values="0.6;1;0.6" dur="1.5s" repeatCount="indefinite"/></circle><rect x="12" y="10" width="16" height="12" rx="3" fill="${C.copper}" stroke="${C.darkRust}" stroke-width="1.2"/><circle cx="17" cy="16" r="2" fill="${C.darkMetal}"/><circle cx="17" cy="16" r="1" fill="${C.glow}"/><circle cx="23" cy="16" r="2" fill="${C.darkMetal}"/><circle cx="23" cy="16" r="1" fill="${C.glow}"/><rect x="14" y="22" width="12" height="10" rx="2" fill="${C.metal}" stroke="${C.darkRust}" stroke-width="1"/><circle cx="20" cy="27" r="1.5" fill="${C.rivet}"/><rect x="8" y="24" width="6" height="3" rx="1" fill="${C.copper}"/><rect x="26" y="24" width="6" height="3" rx="1" fill="${C.copper}"/><rect x="15" y="32" width="4" height="4" rx="1" fill="${C.darkRust}"/><rect x="21" y="32" width="4" height="4" rx="1" fill="${C.darkRust}"/></svg>`;}
+function keySVG(sz){return`<svg viewBox="0 0 30 30" width="${sz}" height="${sz}" style="animation:keyGlow 2s ease-in-out infinite"><circle cx="10" cy="10" r="5.5" fill="none" stroke="${C.glow}" stroke-width="2.5"/><circle cx="10" cy="10" r="2.5" fill="${C.glow}" opacity="0.3"/><line x1="15" y1="10" x2="26" y2="10" stroke="${C.glow}" stroke-width="2.5" stroke-linecap="round"/><line x1="22" y1="10" x2="22" y2="15" stroke="${C.glow}" stroke-width="2" stroke-linecap="round"/><line x1="25" y1="10" x2="25" y2="13" stroke="${C.glow}" stroke-width="2" stroke-linecap="round"/></svg>`;}
+function levelDots(p){let h="";for(let i=0;i<3;i++){const d=i<S.pLvl[p],cu=i===S.pLvl[p];h+=`<div style="width:10px;height:10px;border-radius:50%;background:${d?C.success:cu?C.glow:C.darkMetal};border:1.5px solid ${C.darkRust};box-shadow:${d?`0 0 6px ${C.success}`:cu?`0 0 6px ${C.glow}`:"none"};transition:all 0.3s"></div>`;}return`<div style="display:flex;gap:5px;justify-content:center;margin:8px 0">${h}</div>`;}
+function backBtn(){return`<button data-action="back" class="game-btn" style="background:linear-gradient(145deg,${C.copper},${C.darkRust});border:2px solid ${C.brass};border-radius:10px;padding:clamp(10px,2.5vw,14px) 20px;cursor:pointer;color:${C.brass};font-size:clamp(16px,4vw,20px);font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px;width:100%;min-height:48px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5m7-7l-7 7 7 7"/></svg></button>`;}
+const panelStyle=`background:repeating-linear-gradient(90deg,rgba(255,255,255,0.03) 0px,transparent 1px,transparent 3px),linear-gradient(145deg,#6d5a38 0%,#9d8450 20%,#7d6d4e 40%,#5a4c36 70%,#453828 100%);border:3px solid ${C.darkRust};border-radius:16px;padding:clamp(14px,4vw,24px) clamp(12px,3.5vw,20px);position:relative;max-width:460px;width:94vw;box-shadow:4px 6px 20px rgba(0,0,0,0.7),inset 2px 2px 6px rgba(255,220,150,0.08),inset -2px -2px 6px rgba(0,0,0,0.4),0 0 3px ${C.brass}`;
+const overlayStyle=`position:fixed;inset:0;background:rgba(24,18,10,0.95);display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:100;animation:fadeIn 0.3s`;
+
+/* ── Render: Main ── */
+function renderMain(){
+  const p=pct(),gs=S.safeOpen;
+  const gSp=gs?8:35,gCl=gs?C.glow:C.copper,gCl2=gs?C.glowDim:C.rivet;
+  let pDots="";for(let i=0;i<9;i++){const d=i<S.progress;pDots+=`<svg width="12" height="12" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" fill="${d?C.success:C.darkMetal}" stroke="${C.darkRust}" stroke-width="1.5" style="transition:fill 0.5s"/>${d?`<circle cx="8" cy="8" r="5" fill="${C.success}" opacity="0.5"><animate attributeName="opacity" values="0.3;0.6;0.3" dur="2s" repeatCount="indefinite" begin="${i*0.2}s"/></circle>`:""}</svg>`;}
+  let ticks="";for(let i=1;i<=8;i++)ticks+=`<div style="position:absolute;left:${i/9*100}%;top:0;bottom:0;width:1px;background:${C.darkRust};opacity:0.4"></div>`;
+
+  let safeContent;
+  if(gs){
+    /* Safe opened — show open door visual instead of text */
+    safeContent=`<div style="display:flex;flex-direction:column;align-items:center;padding:6px 0;animation:safeOpen 0.8s ease-out">
+      <svg width="80" height="90" viewBox="0 0 80 90">
+        <path d="M10 88V30Q10 4 40 4Q70 4 70 30V88" fill="none" stroke="${C.brass}" stroke-width="3"/>
+        <path d="M14 88V32Q14 8 40 8Q66 8 66 32V88Z" fill="${C.darkMetal}"/>
+        <ellipse cx="40" cy="60" rx="18" ry="22" fill="${C.glow}" opacity="0.08"><animate attributeName="opacity" values="0.05;0.12;0.05" dur="2.5s" repeatCount="indefinite"/></ellipse>
+        ${rivetSVG(14,25,2)}${rivetSVG(66,25,2)}${rivetSVG(14,60,2)}${rivetSVG(66,60,2)}
+        <path d="M40 72l4-4m-4 4l-4-4m4 4V62" stroke="${C.glow}" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.7"><animate attributeName="opacity" values="0.4;1;0.4" dur="1.2s" repeatCount="indefinite"/></path>
+      </svg>
+    </div>`;
+  }else{
+    safeContent=`<div style="text-align:center"><svg width="120" height="100" viewBox="0 0 120 100" style="opacity:0.6"><rect x="10" y="10" width="100" height="80" rx="10" fill="${C.darkMetal}" stroke="${C.darkRust}" stroke-width="3"/><circle cx="60" cy="50" r="20" fill="none" stroke="${C.darkRust}" stroke-width="3"/><circle cx="60" cy="50" r="12" fill="none" stroke="${C.darkRust}" stroke-width="2"/><circle cx="60" cy="50" r="4" fill="${C.darkRust}"/><rect x="80" y="40" width="20" height="20" rx="3" fill="${C.darkRust}"/>${Array.from({length:8},(_,i)=>{const a=i*45*Math.PI/180;return`<line x1="${60+Math.cos(a)*16}" y1="${50+Math.sin(a)*16}" x2="${60+Math.cos(a)*20}" y2="${50+Math.sin(a)*20}" stroke="${C.darkRust}" stroke-width="2"/>`;}).join("")}</svg><div style="color:${C.darkRust};font-size:12px;font-family:serif;margin-top:4px;opacity:0.5">${p}%</div></div>`;
+  }
+
+  const icons=[
+    `<svg width="42" height="42" viewBox="0 0 44 44"><rect x="0" y="17" width="44" height="10" rx="3" fill="${C.copper}" stroke="${C.darkRust}" stroke-width="1.5"/><rect x="17" y="0" width="10" height="44" rx="3" fill="${C.copper}" stroke="${C.darkRust}" stroke-width="1.5"/><circle cx="22" cy="22" r="6" fill="${C.darkMetal}" stroke="${C.darkRust}" stroke-width="1.5"/></svg>`,
+    `<svg width="42" height="42" viewBox="0 0 44 44">${Array.from({length:8},(_,i)=>`<rect x="19" y="2" width="6" height="10" rx="2" fill="${C.copper}" transform="rotate(${i*45} 22 22)" stroke="${C.darkRust}" stroke-width="0.5"/>`).join("")}<circle cx="22" cy="22" r="13" fill="${C.metal}" stroke="${C.darkRust}" stroke-width="1.5"/><circle cx="22" cy="22" r="8" fill="${C.darkMetal}" stroke="${C.darkRust}" stroke-width="1"/><circle cx="22" cy="22" r="3" fill="${C.rivet}"/><circle cx="22" cy="11" r="3" fill="${C.brass}"/></svg>`,
+    `<svg width="42" height="42" viewBox="0 0 44 44">${[0,1,2].map(r=>[0,1,2].map(c=>`<rect x="${4+c*14}" y="${4+r*14}" width="10" height="10" rx="2" fill="${r===1&&c===1?C.brass:C.darkMetal}" stroke="${C.darkRust}" stroke-width="1"/>`).join("")).join("")}</svg>`
+  ];
+  const acts=["open-pipe","open-gear","open-seq"];
+  let btns="";
+  if(!gs){
+    btns=`<div style="display:flex;gap:16px;z-index:2;margin-top:24px;flex-wrap:wrap;justify-content:center">`;
+    for(let idx=0;idx<3;idx++){const dn=S.pLvl[idx]>=3;let dots="";for(let i=0;i<3;i++){const d=i<S.pLvl[idx];dots+=`<div style="width:6px;height:6px;border-radius:50%;background:${d?C.success:C.darkMetal};border:1px solid ${C.darkRust};box-shadow:${d?`0 0 4px ${C.success}`:"none"}"></div>`;}
+      const di=dn?`<circle cx="22" cy="22" r="5" fill="${C.success}" opacity="0.8"/>`:"";const ic=icons[idx].replace("</svg>",di+"</svg>");
+      btns+=`<div data-action="${acts[idx]}" style="width:clamp(82px,22vw,110px);height:clamp(82px,22vw,110px);border-radius:14px;cursor:${dn?"default":"pointer"};background:linear-gradient(145deg,${C.metal},${C.darkMetal});border:2.5px solid ${dn?C.success:C.darkRust};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;box-shadow:${dn?`0 0 14px rgba(92,191,92,0.25)`:`0 5px 15px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.04)`};opacity:${dn?0.65:1};animation:${!dn?"breathe 3s ease-in-out infinite":"none"};animation-delay:${idx*0.4}s">${ic}<div style="display:flex;gap:3px;margin-top:2px">${dots}</div></div>`;}
+    btns+=`</div>`;
+  }
+
+  /* Maze entrance button — after safe opens */
+  let mazeBtn="";
+  if(gs&&!S.mazeComplete){
+    mazeBtn=`<div data-action="open-maze" class="game-btn" style="z-index:2;margin-top:20px;cursor:pointer;animation:breathe 3s ease-in-out infinite;background:linear-gradient(145deg,${C.copper},${C.darkRust});border:2.5px solid ${C.brass};border-radius:14px;padding:14px 28px;display:flex;align-items:center;gap:12px;color:${C.glow};font-size:clamp(16px,4.5vw,22px);font-family:inherit;letter-spacing:0.05em">
+        ${robotSVG(36)}
+        <span style="text-shadow:0 0 8px rgba(255,215,0,0.3)">Enter the Maze</span>
+    </div>`;
+  }
+  if(S.mazeComplete){
+    mazeBtn=`<div style="z-index:2;margin-top:16px;color:${C.success};font-size:14px;font-family:serif;opacity:0.6">★</div>`;
+  }
+
+  let celeb="";if(S.celebAnim)celeb=`<div style="position:fixed;inset:0;pointer-events:none;z-index:200;display:flex;align-items:center;justify-content:center"><div style="animation:coinBounce 1s ease-out forwards"><svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="${C.success}" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-6"/></svg></div></div>`;
+
+  /* "Solve these tasks" embossed header */
+  const helpText=!gs?`<div style="z-index:2;margin-bottom:clamp(12px,3vw,22px);font-size:clamp(18px,5vw,28px);font-family:Georgia,'Palatino Linotype',serif;letter-spacing:0.08em;text-transform:uppercase;text-align:center;color:${C.brass};text-shadow:0 1px 0 rgba(255,220,150,0.25),0 -1px 0 rgba(0,0,0,0.5),0 0 12px rgba(255,160,50,0.12)">solve these tasks</div>`:"";
+
+  app().innerHTML=`<div style="min-height:100dvh;width:100vw;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:clamp(12px,3vw,24px);box-sizing:border-box;background:radial-gradient(ellipse at 50% 100%,rgba(180,120,60,0.15) 0%,transparent 60%),radial-gradient(ellipse at 40% 30%,#4a3e28,#241a10 55%,#18120a);position:relative;overflow:hidden">
+    <!-- Warm point light near safe -->
+    <div style="position:absolute;top:35%;left:50%;transform:translateX(-50%);width:clamp(200px,60vw,400px);height:clamp(200px,60vw,400px);background:radial-gradient(circle,rgba(255,140,30,0.1) 0%,transparent 65%);pointer-events:none;animation:flicker 5s ease-in-out infinite"></div>
+    <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:${gs?0.15:0.06}" viewBox="0 0 400 700" preserveAspectRatio="xMidYMid slice">${ambientGearSVG(55,35,60,gSp,gCl)}${ambientGearSVG(40,370,90,gs?6:28,gCl2)}${ambientGearSVG(65,45,640,gs?10:45,gCl)}${ambientGearSVG(50,360,600,gs?7:38,gCl)}${ambientGearSVG(30,200,25,gs?5:22,gCl2)}</svg>
+    ${helpText}
+    <div style="width:min(360px,90vw);margin-bottom:clamp(16px,4vw,28px);z-index:2"><div style="height:clamp(28px,7vw,36px);background:linear-gradient(180deg,${C.darkMetal},#1a1510);border-radius:14px;border:2.5px solid ${C.darkRust};position:relative;overflow:hidden;box-shadow:inset 0 3px 12px rgba(0,0,0,0.7),0 2px 6px rgba(0,0,0,0.3)"><div class="progress-fill" style="height:100%;width:${p}%;background:linear-gradient(90deg,${C.rust},${C.glow},${C.brass});border-radius:12px;box-shadow:${p>0?`0 0 12px rgba(255,215,0,0.4),inset 0 -2px 4px rgba(0,0,0,0.2)`:"none"};position:relative">${p>0?`<div style="position:absolute;right:4px;top:4px;bottom:4px;width:6px;border-radius:3px;background:rgba(255,255,255,0.25)"></div>`:""}</div>${ticks}</div><div style="display:flex;justify-content:space-between;margin-top:4px;padding:0 4px">${pDots}</div></div>
+    <div class="safe-box" style="width:min(340px,88vw);background:linear-gradient(160deg,${C.lightMetal},${C.metal} 40%,${C.darkMetal});border-radius:16px;border:4px solid ${C.darkRust};padding:24px 20px;position:relative;z-index:2;box-shadow:0 12px 50px rgba(0,0,0,0.6),inset 0 2px 12px rgba(255,255,255,0.04),inset 0 -5px 20px rgba(0,0,0,0.5);transform:${gs?"scale(1.02)":"none"}"><svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none" viewBox="0 0 300 280">${rivetSVG(18,18)}${rivetSVG(282,18)}${rivetSVG(18,262)}${rivetSVG(282,262)}${rivetSVG(150,12,4)}${rivetSVG(150,268,4)}</svg><div style="text-align:center;margin-bottom:12px"><svg width="60" height="60" viewBox="0 0 60 60">${ambientGearSVG(26,30,30,gs?5:20,gs?C.glow:C.brass)}</svg></div>${safeContent}</div>
+    ${btns}${mazeBtn}
+    ${TEST_SKIP&&!gs?`<button data-action="skip-puzzles" class="game-btn" style="background:linear-gradient(145deg,#555,#333);border:2px solid #666;border-radius:8px;padding:6px 14px;cursor:pointer;color:#aaa;font-size:12px;font-family:inherit;margin-top:12px;min-height:36px;opacity:0.45;z-index:2">⏭ skip to maze (test)</button>`:""}
+    ${celeb}
+  </div>`;
+}
+
+/* ── Render: Pipe ── */
+function renderPipe(){
+  if(!S.pipeGrid)return;const li=Math.min(S.pLvl[0],2),lv=PIPE_LEVELS[li];
+  const cs=Math.min(62,Math.floor((window.innerWidth*0.88-100)/lv.cols)),gap=4;
+  let gc="";
+  for(let ri=0;ri<lv.rows;ri++){
+    if(ri===lv.srcRow){const hf=S.pipeFlow.size>0;gc+=`<div style="grid-row:${ri+1};grid-column:1;display:flex;align-items:center;justify-content:flex-end"><svg viewBox="0 0 38 50" width="32" height="42"><rect x="0" y="10" width="28" height="30" rx="5" fill="${C.copper}" stroke="${C.darkRust}" stroke-width="2"/><rect x="6" y="14" width="18" height="22" rx="3" fill="${C.metal}" opacity="0.4"/><circle cx="15" cy="22" r="5" fill="${C.darkMetal}" stroke="${C.brass}" stroke-width="1.2"/><line x1="15" y1="22" x2="${hf?18:13}" y2="${hf?18:21}" stroke="${hf?C.success:C.fail}" stroke-width="1.5" stroke-linecap="round"/><circle cx="15" cy="22" r="1.2" fill="${C.brass}"/>${rivetSVG(7,14,2)}${rivetSVG(25,14,2)}<rect x="26" y="21" width="12" height="8" rx="1.5" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="0.8"/><ellipse cx="14" cy="42" rx="8" ry="3.5" fill="#CC4422" opacity="0.6"><animate attributeName="opacity" values="0.4;0.7;0.4" dur="0.7s" repeatCount="indefinite"/></ellipse><circle cx="10" cy="6" r="3" fill="${C.steam}" opacity="0"><animate attributeName="opacity" values="0;0.35;0" dur="2s" repeatCount="indefinite"/><animateTransform attributeName="transform" type="translate" values="0,0;-2,-8" dur="2s" repeatCount="indefinite"/></circle></svg></div>`;}else gc+=`<div style="grid-row:${ri+1};grid-column:1"></div>`;
+    for(let ci=0;ci<lv.cols;ci++){const cl=S.pipeGrid[ri][ci];if(!cl){gc+=`<div style="grid-row:${ri+1};grid-column:${ci+2};aspect-ratio:1;background:rgba(0,0,0,0.5);border-radius:4px;border:2px solid ${C.darkMetal};box-shadow:inset 0 2px 8px rgba(0,0,0,0.8)"></div>`;continue;}
+      const hf=S.pipeFlow.has(ri+","+ci),fx=cl.fixed,ad=S.pipeDone;let cls="pipe-cell";if(hf&&!ad)cls+=" pipe-cell-flow";if(fx)cls+=" pipe-cell-fixed";
+      const bc=ad?C.glow:fx?C.brass:C.darkRust,bg=ad?"rgba(255,215,0,0.08)":"rgba(0,0,0,0.35)",cur=fx||ad?"default":"pointer";
+      const fo=fx?`<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none" viewBox="0 0 60 60">${rivetSVG(8,8,3)}${rivetSVG(52,8,3)}${rivetSVG(8,52,3)}${rivetSVG(52,52,3)}</svg>`:"";
+      const act=fx?"":"data-action=\"rotate-pipe\"";
+      gc+=`<div ${act} data-r="${ri}" data-c="${ci}" data-pipe="${ri}-${ci}" class="${cls}" style="grid-row:${ri+1};grid-column:${ci+2};aspect-ratio:1;background:${bg};border-radius:4px;cursor:${cur};border:2px solid ${bc};overflow:hidden;position:relative">${fo}<svg viewBox="0 0 60 60" class="pipe-svg" style="width:100%;height:100%;transform:rotate(${cl.cr*90}deg)">${pipeCellSVG(cl.t,ri,ci)}</svg></div>`;}
+    if(ri===lv.dstRow){let dr=false;for(let r2=0;r2<lv.rows;r2++){if(S.pipeFlow.has(r2+","+(lv.cols-1))){const c2=S.pipeGrid[r2][lv.cols-1];if(c2&&getOpenings(c2.t,c2.cr).includes(1)){dr=true;break;}}}const pw=dr||S.pipeDone;
+      gc+=`<div style="grid-row:${ri+1};grid-column:${lv.cols+2};display:flex;align-items:center;justify-content:flex-start"><svg viewBox="0 0 38 50" width="32" height="42"><rect x="8" y="8" width="28" height="34" rx="5" fill="${C.metal}" stroke="${C.darkRust}" stroke-width="2"/><rect x="12" y="12" width="20" height="26" rx="3" fill="${C.darkMetal}" opacity="0.5"/><rect x="-2" y="21" width="12" height="8" rx="1.5" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="0.8"/><circle cx="22" cy="22" r="6" fill="${pw?C.brass:C.metal}" stroke="${C.darkRust}" stroke-width="1.2"/><circle cx="22" cy="22" r="2" fill="${C.darkMetal}"/><circle cx="22" cy="36" r="4" fill="${pw?C.glow:C.darkMetal}" stroke="${C.darkRust}" stroke-width="1.2" opacity="${pw?1:0.4}"/>${rivetSVG(13,12,2)}${rivetSVG(31,12,2)}</svg></div>`;}
+    else gc+=`<div style="grid-row:${ri+1};grid-column:${lv.cols+2}"></div>`;
+  }
+  const hi=!S.pipeDone?`<div style="text-align:center;opacity:0.35;margin-top:4px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${C.brass}" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></div>`:"";
+  const di=S.pipeDone?`<div style="text-align:center;margin-top:6px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="${C.success}" stroke-width="2.5" style="animation:pulse 0.8s ease-in-out infinite"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-6"/></svg></div>`:"";
+  let hint="";if(S.pipeHint)hint=`<div id="pipe-hint" style="text-align:center;margin-bottom:6px;pointer-events:none;animation:hintFade 5s ease forwards"><svg width="200" height="50" viewBox="0 0 200 50"><rect x="2" y="2" width="196" height="40" rx="16" fill="rgba(50,40,28,0.96)" stroke="${C.brass}" stroke-width="2"/><rect x="4" y="4" width="192" height="36" rx="14" fill="none" stroke="${C.glow}" stroke-width="0.5" opacity="0.3"/><circle cx="100" cy="46" r="2.5" fill="rgba(50,40,28,0.9)" stroke="${C.brass}" stroke-width="0.8"/><g transform="translate(17,0)"><rect x="16" y="10" width="20" height="18" rx="4" fill="${C.copper}" stroke="${C.darkRust}" stroke-width="1.2"/><ellipse cx="26" cy="32" rx="6" ry="2" fill="#CC4422" opacity="0.7"/><line x1="42" y1="20" x2="56" y2="20" stroke="${C.glow}" stroke-width="2.5" stroke-dasharray="5,3"><animate attributeName="stroke-dashoffset" values="8;0" dur="0.8s" repeatCount="indefinite"/></line><rect x="60" y="14" width="12" height="12" rx="3" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="1"/><rect x="76" y="14" width="12" height="12" rx="3" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="1"/><rect x="92" y="14" width="12" height="12" rx="3" fill="${C.pipe}" stroke="${C.darkRust}" stroke-width="1"/><line x1="108" y1="20" x2="122" y2="20" stroke="${C.glow}" stroke-width="2.5" stroke-dasharray="5,3"><animate attributeName="stroke-dashoffset" values="8;0" dur="0.8s" repeatCount="indefinite"/></line><rect x="126" y="10" width="20" height="18" rx="4" fill="${C.metal}" stroke="${C.darkRust}" stroke-width="1.2"/><g style="transform-origin:136px 19px;animation:spin 3s linear infinite"><circle cx="136" cy="19" r="5" fill="${C.brass}" stroke="${C.darkRust}" stroke-width="1"/><circle cx="136" cy="19" r="2" fill="${C.darkMetal}"/></g><circle cx="136" cy="27" r="2.5" fill="${C.glow}" opacity="0.7"><animate attributeName="opacity" values="0.4;0.9;0.4" dur="1s" repeatCount="indefinite"/></circle></g></svg></div>`;
+  app().innerHTML=`<div style="${overlayStyle}"><div style="${panelStyle}">${hint}${levelDots(0)}<div style="display:grid;grid-template-columns:36px repeat(${lv.cols},${cs}px) 36px;grid-template-rows:repeat(${lv.rows},${cs}px);gap:${gap}px;align-items:center;justify-content:center;margin:0 auto 8px">${gc}</div>${hi}${di}${backBtn()}</div></div>`;
+}
+
+/* ── Render: Gear ── */
+function renderGear(){
+  const li=Math.min(S.pLvl[1],2),lv=GEAR_LEVELS[li],gS=Math.min(80,Math.floor((window.innerWidth*0.8)/(lv.cols+1))),gG=14;
+  let tg="";for(let i=0;i<lv.n;i++)tg+=`<svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="${C.metal}" stroke="${C.darkRust}" stroke-width="1"/><circle cx="8" cy="3" r="2" fill="${C.glow}"/></svg>`;
+  const gW=lv.cols*(gS+gG)-gG,gH=lv.rows*(gS+gG)-gG;let belts="";const pm=new Map();
+  for(let i=0;i<lv.n;i++){const[c,r]=lv.pos[i];pm.set(i,{x:c*(gS+gG)+gS/2,y:r*(gS+gG)+gS/2});}
+  for(const[a,b]of lv.adj){const pa=pm.get(a),pb=pm.get(b);belts+=`<line x1="${pa.x}" y1="${pa.y}" x2="${pb.x}" y2="${pb.y}" stroke="${C.rust}" stroke-width="4" stroke-linecap="round" opacity="0.5"/><line x1="${pa.x}" y1="${pa.y}" x2="${pb.x}" y2="${pb.y}" stroke="${C.brass}" stroke-width="2" stroke-dasharray="6,5" opacity="0.6"/>`;}
+  let gc="";const pl=new Set();
+  for(let i=0;i<lv.n;i++){const[c,r]=lv.pos[i];pl.add(r+","+c);const dn=S.gearDone&&S.gears[i]===0;gc+=`<div data-action="click-gear" data-i="${i}" style="grid-row:${r+1};grid-column:${c+1};cursor:pointer;display:flex;align-items:center;justify-content:center" data-gear="${i}">${puzzleGearSVG(S.gears[i],gS,dn)}</div>`;}
+  for(let r=0;r<lv.rows;r++)for(let c=0;c<lv.cols;c++){if(!pl.has(r+","+c))gc+=`<div style="grid-row:${r+1};grid-column:${c+1}"></div>`;}
+  const di=S.gearDone?`<div style="text-align:center;margin-top:4px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="${C.success}" stroke-width="2.5" style="animation:pulse 0.8s ease-in-out infinite"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-6"/></svg></div>`:"";
+  const uh=!S.gearDone?`<div style="text-align:center;opacity:0.35;margin-top:2px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${C.brass}" stroke-width="2.5"><path d="M12 19V5m-5 5l5-5 5 5"/></svg></div>`:"";
+  app().innerHTML=`<div style="${overlayStyle}"><div style="${panelStyle}">${levelDots(1)}<div style="display:flex;align-items:center;justify-content:center;gap:8px;background:rgba(50,40,28,0.9);border:2px solid ${C.brass};border-radius:16px;padding:8px 14px;margin:0 auto 14px;width:fit-content;position:relative"><svg width="30" height="30" viewBox="0 0 32 32"><rect x="8" y="10" width="16" height="16" rx="3" fill="${C.copper}" stroke="${C.darkRust}" stroke-width="1.5"/><circle cx="14" cy="17" r="2.5" fill="${C.glow}"><animate attributeName="opacity" values="0.7;1;0.7" dur="2s" repeatCount="indefinite"/></circle><circle cx="22" cy="17" r="2.5" fill="${C.glow}"><animate attributeName="opacity" values="0.7;1;0.7" dur="2s" repeatCount="indefinite" begin="0.3s"/></circle><rect x="14" y="5" width="2" height="6" fill="${C.copper}"/><circle cx="15" cy="4" r="2.5" fill="${C.brass}"/><rect x="3" y="15" width="5" height="3" rx="1" fill="${C.copper}"/><rect x="24" y="15" width="5" height="3" rx="1" fill="${C.copper}"/></svg><div style="width:1px;height:24px;background:${C.darkRust};margin:0 4px"></div><div style="display:flex;gap:3px;align-items:center">${tg}<svg width="16" height="16" viewBox="0 0 16 16" style="margin-left:4px"><path d="M8 12V4m-3 3l3-3 3 3" fill="none" stroke="${C.glow}" stroke-width="2"/></svg></div><div style="position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:8px solid ${C.brass}"></div></div><div style="position:relative;width:${gW}px;height:${gH}px;margin:0 auto"><svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none" viewBox="0 0 ${gW} ${gH}">${belts}</svg><div style="display:grid;grid-template-columns:repeat(${lv.cols},${gS}px);grid-template-rows:repeat(${lv.rows},${gS}px);gap:${gG}px;position:relative">${gc}</div></div>${uh}${di}${backBtn()}</div></div>`;
+}
+
+/* ── Render: Sequence ── */
+function renderSeq(){
+  const li=Math.min(S.pLvl[2],2),lv=SEQ_LEVELS[li],gC=lv.cols;let ph="";
+  if(S.seqPhase==="watch")ph=`<svg width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="10" fill="none" stroke="${C.brass}" stroke-width="2"/><circle cx="14" cy="14" r="4" fill="${C.glow}"><animate attributeName="r" values="3;5;3" dur="1s" repeatCount="indefinite"/></circle></svg>`;
+  else if(S.seqPhase==="input"&&!S.seqFail)ph=`<svg width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="10" fill="none" stroke="${C.success}" stroke-width="2"/><path d="M14 8v8m0 0l-3-3m3 3l3-3" stroke="${C.success}" stroke-width="2.5" fill="none"/></svg>`;
+  else if(S.seqPhase==="done")ph=`<svg width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="10" fill="none" stroke="${C.success}" stroke-width="2"/><path d="M9 14l3 4 7-7" stroke="${C.success}" stroke-width="2.5" fill="none"/></svg>`;
+  if(S.seqFail)ph=`<svg width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="10" fill="none" stroke="${C.fail}" stroke-width="2"/><path d="M10 10l8 8m0-8l-8 8" stroke="${C.fail}" stroke-width="2.5"/></svg>`;
+  let gh="";for(let i=0;i<lv.grid;i++){const hi=S.seqHi===i,dn=S.seqDone&&lv.seq.includes(i);gh+=`<div class="seq-btn" data-action="seq-click" data-i="${i}" data-seq-btn="${i}" style="aspect-ratio:1;border-radius:8px;cursor:${S.seqPhase==="input"?"pointer":"default"};background:${hi||dn?`radial-gradient(circle,${C.glow},${C.rust})`:`linear-gradient(145deg,${C.metal},${C.darkMetal})`};border:2px solid ${hi?C.glow:C.darkRust};box-shadow:${hi?`0 0 18px ${C.glow},inset 0 0 10px rgba(255,215,0,0.3)`:`inset 0 2px 8px rgba(0,0,0,0.5)`};display:flex;align-items:center;justify-content:center"><svg width="14" height="14" viewBox="0 0 20 20"><circle cx="10" cy="10" r="5" fill="${hi?C.glow:C.rivet}" stroke="${C.darkRust}" stroke-width="1" opacity="${hi?1:0.35}"/></svg></div>`;}
+  const rb=!S.seqDone?`<button data-action="replay-seq" style="background:linear-gradient(145deg,${C.copper},${C.darkRust});border:2px solid ${C.brass};border-radius:8px;padding:8px 18px;cursor:pointer;color:${C.brass};font-size:18px;font-family:serif;box-shadow:0 3px 10px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;flex:1;margin-top:12px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>`:"";
+  app().innerHTML=`<div style="${overlayStyle}"><div style="${panelStyle}">${levelDots(2)}<div data-seq-phase style="text-align:center;margin-bottom:10px;height:32px">${ph}</div><div style="display:grid;grid-template-columns:repeat(${gC},1fr);gap:6px;max-width:${gC*64}px;margin:0 auto">${gh}</div><div style="display:flex;gap:8px">${backBtn()}${rb}</div></div></div>`;
+}
+
+/* ── Render: Maze (with smooth fog of war) ──
+   Full render on phase changes / level init. Movement uses updateMazeFog()
+   for targeted DOM updates with CSS transitions — no innerHTML thrashing. */
+function getMazeCS(){const lvl=MAZE_LEVELS[S.mazeLvl];const pw=Math.min(460,window.innerWidth*0.94)-50;const ph=window.innerHeight*0.55;return Math.min(44,Math.floor(pw/lvl.cols),Math.floor(ph/lvl.rows));}
+
+function renderMaze(){
+  if(!mazeGrid)return;_mzCells=null;_mzWalls=null;_mzCellState=null;
+  const lvl=MAZE_LEVELS[S.mazeLvl];
+  const cs=getMazeCS(),gW=lvl.cols*cs,gH=lvl.rows*cs;
+
+  /* Build ALL walls upfront (hidden by per-line opacity controlled via class) */
+  let walls="";const wc=C.darkRust,ww=3;
+  for(let r=0;r<lvl.rows;r++)for(let c=0;c<lvl.cols;c++){
+    const x=c*cs,y=r*cs,w=mazeGrid[r][c];
+    /* Each wall line gets a data-wrc for targeted opacity updates */
+    if(w&W_T)walls+=`<line data-wrc="${r},${c},T" class="mz-wall" x1="${x}" y1="${y}" x2="${x+cs}" y2="${y}" stroke="${wc}" stroke-width="${ww}" stroke-linecap="round" opacity="0"/>`;
+    if(w&W_R)walls+=`<line data-wrc="${r},${c},R" class="mz-wall" x1="${x+cs}" y1="${y}" x2="${x+cs}" y2="${y+cs}" stroke="${wc}" stroke-width="${ww}" stroke-linecap="round" opacity="0"/>`;
+    if(w&W_B)walls+=`<line data-wrc="${r},${c},B" class="mz-wall" x1="${x}" y1="${y+cs}" x2="${x+cs}" y2="${y+cs}" stroke="${wc}" stroke-width="${ww}" stroke-linecap="round" opacity="0"/>`;
+    if(w&W_L)walls+=`<line data-wrc="${r},${c},L" class="mz-wall" x1="${x}" y1="${y}" x2="${x}" y2="${y+cs}" stroke="${wc}" stroke-width="${ww}" stroke-linecap="round" opacity="0"/>`;
+  }
+
+  /* Build ALL floor cells upfront, start dark, CSS transition handles fading */
+  let cells="";
+  for(let r=0;r<lvl.rows;r++)for(let c=0;c<lvl.cols;c++){
+    cells+=`<div data-action="maze-cell" data-r="${r}" data-c="${c}" data-mzc="${r},${c}" class="mz-cell" style="position:absolute;left:${c*cs}px;top:${r*cs}px;width:${cs}px;height:${cs}px;background:#14100a;display:flex;align-items:center;justify-content:center;cursor:default"></div>`;
+  }
+
+  /* Phase indicator */
+  let phIco="";
+  if(S.mazePhase==="navigate")phIco=`<svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 4v16m0 0l-5-5m5 5l5-5" stroke="${C.brass}" stroke-width="2.5" fill="none"/></svg>`;
+  else if(S.mazePhase==="find_key")phIco=keySVG(22);
+  else if(S.mazePhase==="has_key")phIco=`<svg width="40" height="22" viewBox="0 0 40 22"><circle cx="8" cy="10" r="4" fill="none" stroke="${C.glow}" stroke-width="1.5"/><line x1="12" y1="10" x2="18" y2="10" stroke="${C.glow}" stroke-width="1.5"/><line x1="22" y1="10" x2="30" y2="10" stroke="${C.brass}" stroke-width="1.5" stroke-dasharray="3,2"><animate attributeName="stroke-dashoffset" values="5;0" dur="0.6s" repeatCount="indefinite"/></line><path d="M32 18V8Q32 2 36 2" fill="none" stroke="${C.brass}" stroke-width="1.5"/></svg>`;
+
+  const keyOnRobot=S.mazeHasKey?`<div style="position:absolute;top:-2px;right:-2px;pointer-events:none">${keySVG(cs*0.35)}</div>`:"";
+  const rx=S.mazeRobot.c*cs,ry=S.mazeRobot.r*cs;
+
+  /* Level dots */
+  let mDots="";for(let i=0;i<MAZE_LEVELS.length;i++){const d=i<S.mazeLvl,cu=i===S.mazeLvl;
+    mDots+=`<div style="width:10px;height:10px;border-radius:50%;background:${d?C.success:cu?C.glow:C.darkMetal};border:1.5px solid ${C.darkRust};box-shadow:${d?`0 0 6px ${C.success}`:cu?`0 0 6px ${C.glow}`:"none"}"></div>`;}
+
+  /* Completion overlay */
+  let compOvr="";
+  if(S.mazePhase==="complete"){
+    compOvr=`<div style="position:absolute;inset:0;background:rgba(15,11,6,0.9);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;animation:fadeIn 0.5s;border-radius:6px">
+      <div style="position:relative;display:inline-block">
+        ${robotSVG(72)}
+        <svg style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%)" width="50" height="40" viewBox="0 0 50 40">
+          <rect x="3" y="3" width="44" height="34" rx="4" fill="#F5E6C8" stroke="${C.darkRust}" stroke-width="1.5"/>
+          <line x1="8" y1="10" x2="42" y2="10" stroke="${C.darkRust}" stroke-width="0.5" opacity="0.3"/>
+          <line x1="8" y1="32" x2="42" y2="32" stroke="${C.darkRust}" stroke-width="0.5" opacity="0.3"/>
+          <text x="25" y="27" text-anchor="middle" font-size="18" font-family="'Courier New',monospace" fill="${C.darkRust}" font-weight="bold">3</text>
+        </svg>
+      </div>
+      <div style="background:rgba(60,50,35,0.95);border:2px solid ${C.brass};border-radius:18px;padding:12px 20px;margin-top:14px;position:relative">
+        <div style="color:${C.glow};font-size:clamp(14px,4vw,18px);font-family:inherit;text-align:center">your secret number is</div>
+        <div style="text-align:center;margin-top:8px">
+          <span style="display:inline-block;background:${C.darkMetal};border:2px solid ${C.brass};border-radius:6px;padding:4px 14px;font-size:clamp(28px,8vw,36px);color:${C.glow};font-family:'Courier New',monospace;letter-spacing:2px;box-shadow:inset 0 2px 8px rgba(0,0,0,0.5),0 0 12px rgba(255,215,0,0.3)">3</span>
+        </div>
+        <div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:8px solid ${C.brass}"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;margin-top:14px;opacity:0.7">
+        <svg width="36" height="44" viewBox="0 0 36 44">
+          <path d="M8 20V14a10 10 0 0 1 20 0v6" fill="none" stroke="${C.brass}" stroke-width="2.5"/>
+          <rect x="4" y="20" width="28" height="20" rx="4" fill="${C.copper}" stroke="${C.darkRust}" stroke-width="1.5"/>
+          <circle cx="18" cy="30" r="3" fill="${C.darkMetal}"/><rect x="17" y="32" width="2" height="4" rx="1" fill="${C.darkMetal}"/>
+        </svg>
+        <div style="color:${C.brass};font-size:11px;font-family:serif;letter-spacing:0.05em">combination digit</div>
+      </div>
+    </div>`;
+  }
+
+  const skipBtn="";
+
+  app().innerHTML=`<div style="${overlayStyle}"><div style="${panelStyle}">
+    <div style="display:flex;gap:5px;justify-content:center;margin-bottom:6px">${mDots}</div>
+    <div style="text-align:center;margin-bottom:8px;min-height:24px">${phIco}</div>
+    <div id="maze-grid" style="position:relative;width:${gW}px;height:${gH}px;margin:0 auto;background:#14100a;border:3px solid ${C.brass};border-radius:6px;overflow:hidden">
+      ${cells}
+      <svg id="maze-walls" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:5;" viewBox="0 0 ${gW} ${gH}">${walls}</svg>
+      <div id="maze-robot" style="position:absolute;left:0;top:0;width:${cs}px;height:${cs}px;z-index:10;display:flex;align-items:center;justify-content:center;pointer-events:none;transform:translate3d(${rx}px,${ry}px,0)">
+        ${robotSVG(cs*0.7)}${keyOnRobot}
+      </div>
+      ${compOvr}
+    </div>
+    ${backBtn()}${skipBtn}
+  </div></div>`;
+
+  /* After DOM is built, apply initial fog state via targeted updates */
+  requestAnimationFrame(()=>{updateMazeFog();
+    /* Pulse exit cell through fog to hint direction */
+    const ec=$(`[data-mzc="${mazeExit[0]},${mazeExit[1]}"]`);
+    if(ec){ec.classList.add("goal-pulse");setT(()=>{if(ec)ec.classList.remove("goal-pulse");},2000);}
+  });
+}
+
+/* Targeted fog update — caches DOM refs, batches writes */
+let _mzCells=null,_mzWalls=null,_mzCellState=null;
+function cacheMazeDom(){
+  const lvl=MAZE_LEVELS[S.mazeLvl];
+  _mzCells=new Array(lvl.rows*lvl.cols);_mzWalls={};_mzCellState=new Array(lvl.rows*lvl.cols).fill(0);
+  for(let r=0;r<lvl.rows;r++)for(let c=0;c<lvl.cols;c++){
+    _mzCells[r*lvl.cols+c]=$(`[data-mzc="${r},${c}"]`);
+    const w=mazeGrid[r][c];
+    for(const[side,bit]of[["T",W_T],["R",W_R],["B",W_B],["L",W_L]])
+      if(w&bit)_mzWalls[`${r},${c},${side}`]=$(`[data-wrc="${r},${c},${side}"]`);
+  }
+}
+function updateMazeFog(){
+  const lvl=MAZE_LEVELS[S.mazeLvl],cs=getMazeCS();
+  if(!_mzCells||_mzCells.length!==lvl.rows*lvl.cols)cacheMazeDom();
+  const colors=["#0a0806","rgba(42,35,22,1)","rgba(35,28,18,1)","rgba(70,58,40,1)","rgba(58,48,34,1)"];
+  for(let r=0;r<lvl.rows;r++)for(let c=0;c<lvl.cols;c++){
+    const idx=r*lvl.cols+c,el=_mzCells[idx];if(!el)continue;
+    const v=isVis(r,c),b=S.mazeVisited.has(r+","+c),even=(r+c)%2===0;
+    /* Compute state: 0=hidden, 1=visited, 2=visible */
+    const st=v?2:b?1:0;
+    if(_mzCellState[idx]!==st){_mzCellState[idx]=st;
+      el.style.background=st===2?(even?colors[3]:colors[4]):st===1?(even?colors[1]:colors[2]):colors[0];
+      el.style.cursor=st>0?"pointer":"default";
+    }
+    /* Items: exit door, key — only update when content should change */
+    const isExit=r===mazeExit[0]&&c===mazeExit[1];
+    const isKey=S.mazeKeyVisible&&r===mazeKeyPos[0]&&c===mazeKeyPos[1];
+    if(isExit&&st>0){
+      if(S.mazeDoorOpen&&!el.querySelector("[data-door-open]"))
+        el.innerHTML=`<svg data-door-open viewBox="0 0 30 30" width="${cs*0.7}" height="${cs*0.7}"><path d="M6 28V10Q6 2 15 2Q24 2 24 10V28" fill="none" stroke="${C.brass}" stroke-width="2"/><rect x="8" y="10" width="14" height="18" rx="1" fill="${C.darkMetal}" opacity="0.4"/><rect x="10" y="12" width="10" height="14" rx="1" fill="${C.glow}" opacity="0.15"/></svg>`;
+      else if(!S.mazeDoorOpen&&!el.querySelector("[data-door-closed]"))
+        el.innerHTML=`<svg data-door-closed id="maze-door" viewBox="0 0 30 30" width="${cs*0.7}" height="${cs*0.7}"><path d="M6 28V10Q6 2 15 2Q24 2 24 10V28" fill="none" stroke="${C.brass}" stroke-width="2"/><path d="M8 28V11Q8 4 15 4Q22 4 22 11V28Z" fill="${C.copper}" stroke="${C.darkRust}" stroke-width="1"/><circle cx="18" cy="18" r="2" fill="${C.darkMetal}" stroke="${C.brass}" stroke-width="0.8"/><rect x="17.2" y="19" width="1.6" height="4" rx="0.5" fill="${C.darkMetal}"/></svg>`;
+    }
+    if(isKey&&v&&!el.querySelector("[data-maze-key]"))el.innerHTML=`<span data-maze-key>${keySVG(cs*0.6)}</span>`;
+    if(!isKey&&!isExit&&el.children.length)el.innerHTML="";
+  }
+  /* Wall opacity — cached refs */
+  for(let r=0;r<lvl.rows;r++)for(let c=0;c<lvl.cols;c++){
+    const v=isVis(r,c),b=S.mazeVisited.has(r+","+c);
+    const op=v?"1":b?"0.35":"0";
+    const w=mazeGrid[r][c];
+    for(const[side,bit]of[["T",W_T],["R",W_R],["B",W_B],["L",W_L]]){
+      if(!(w&bit))continue;
+      const line=_mzWalls[`${r},${c},${side}`];
+      if(line&&line.getAttribute("opacity")!==op)line.setAttribute("opacity",op);
+    }
+  }
+}
+
+/* ── Game Actions ── */
+function advancePuzzle(idx){S.pLvl[idx]=Math.min(S.pLvl[idx]+1,3);S.progress++;if(pct()>=100&&!S.safeOpen)S.safeOpen=true;saveProgress();}
+function autoAdvance(idx){
+  /* If current puzzle has more levels, start next level of same puzzle */
+  if(S.pLvl[idx]<3){
+    const openers=[openPipe,openGear,openSeq];openers[idx]();return;
+  }
+  /* Current puzzle done — find next uncompleted puzzle */
+  for(let i=0;i<3;i++){const ni=(idx+1+i)%3;if(S.pLvl[ni]<3){const openers=[openPipe,openGear,openSeq];openers[ni]();return;}}
+  /* All puzzles done — go to main */
+  S.screen="main";render();
+}
+function goBack(){clearAllTimers();S.screen="main";render();}
+
+/* Pipe */
+function openPipe(){if(S.pLvl[0]>=3)return;const li=S.pLvl[0];S.pipeGrid=scramblePipeGrid(li);S.pipeDone=false;S.pipeFlow=computeFlow(S.pipeGrid,PIPE_LEVELS[li].srcRow);S.pipeHint=true;S.screen="pipe";render();setTimeout(()=>{S.pipeHint=false;},4200);}
+let _pipeCellCache=null;
+function rotatePipe(r,c){if(S.pipeDone)return;const cl=S.pipeGrid[r][c];if(!cl||cl.fixed)return;playSound("click");haptic(15);cl.cr=(cl.cr+1)%4;
+  /* Kick off GPU rotation immediately — no blocking */
+  const sv=$(`[data-pipe="${r}-${c}"] .pipe-svg`);if(sv)sv.style.transform=`rotate(${cl.cr*90}deg)`;
+  /* Defer flow computation to next frame so rotation renders first */
+  requestAnimationFrame(()=>{
+    const li=Math.min(S.pLvl[0],2),lv=PIPE_LEVELS[li];S.pipeFlow=computeFlow(S.pipeGrid,lv.srcRow);
+    /* Cache cell DOM refs on first use */
+    if(!_pipeCellCache||_pipeCellCache.lvl!==li){_pipeCellCache={lvl:li,els:{}};for(let ri=0;ri<lv.rows;ri++)for(let ci=0;ci<lv.cols;ci++){const el=$(`[data-pipe="${ri}-${ci}"]`);if(el)_pipeCellCache.els[ri+","+ci]=el;}}
+    for(let ri=0;ri<lv.rows;ri++)for(let ci=0;ci<lv.cols;ci++){if(!S.pipeGrid[ri][ci])continue;const el=_pipeCellCache.els[ri+","+ci];if(!el)continue;const hf=S.pipeFlow.has(ri+","+ci);if(hf&&!el.classList.contains("pipe-cell-flow"))el.classList.add("pipe-cell-flow");else if(!hf&&el.classList.contains("pipe-cell-flow"))el.classList.remove("pipe-cell-flow");}
+    if(isPipeSolved(li,S.pipeGrid)){S.pipeDone=true;S.pipeFlow=computeFlow(S.pipeGrid,lv.srcRow);playSound("success");haptic(80);setT(()=>{_pipeCellCache=null;renderPipe();},150);setT(()=>{advancePuzzle(0);autoAdvance(0);},1600);}
+  });}
+
+/* Gear */
+function openGear(){if(S.pLvl[1]>=3)return;const lv=GEAR_LEVELS[S.pLvl[1]];S.gears=[...lv.start];S.gearDone=false;S.screen="gear";render();}
+function clickGearAction(i){if(S.gearDone)return;playSound("gear");haptic(20);const lv=GEAR_LEVELS[Math.min(S.pLvl[1],2)],nb=getGearNeighbors(lv);const gSz=Math.min(80,Math.floor((window.innerWidth*0.8)/(lv.cols+1)));for(const j of nb[i]){S.gears[j]=(S.gears[j]+1)%4;const el=$(`[data-gear="${j}"]`);if(el)el.innerHTML=puzzleGearSVG(S.gears[j],gSz,false);}if(isGearSolved(S.gears)){S.gearDone=true;playSound("success");haptic(80);setT(()=>renderGear(),200);setT(()=>{advancePuzzle(1);autoAdvance(1);},1600);}}
+
+/* Sequence */
+function openSeq(){if(S.pLvl[2]>=3)return;S.seqDone=false;S.seqFail=false;S.seqPhase="watch";S.seqInput=[];S.seqHi=-1;S.screen="seq";render();setTimeout(()=>playSeq(),400);}
+let seqGen=0;
+function playSeq(){clearAllTimers();const gen=++seqGen;S.seqPhase="watch";S.seqInput=[];S.seqFail=false;S.seqHi=-1;
+  /* Targeted update to avoid full re-render blink */
+  if(S.screen==="seq"){const phEl=$("[data-seq-phase]");if(phEl)phEl.innerHTML=`<svg width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="10" fill="none" stroke="${C.brass}" stroke-width="2"/><circle cx="14" cy="14" r="4" fill="${C.glow}"><animate attributeName="r" values="3;5;3" dur="1s" repeatCount="indefinite"/></circle></svg>`;$$("[data-seq-btn]").forEach(b=>{b.style.background=`linear-gradient(145deg,${C.metal},${C.darkMetal})`;b.style.borderColor=C.darkRust;b.style.boxShadow=`inset 0 2px 8px rgba(0,0,0,0.5)`;b.style.cursor="default";const s=b.querySelector("circle");if(s){s.setAttribute("fill",C.rivet);s.setAttribute("opacity","0.35");}});}else render();
+  const seq=SEQ_LEVELS[Math.min(S.pLvl[2],2)].seq;let i=0;function step(){if(gen!==seqGen)return;if(i<seq.length){hiB(seq[i]);setT(()=>{if(gen!==seqGen)return;S.seqHi=-1;unHi();i++;setT(step,350);},700);}else{S.seqPhase="input";render();}}setT(step,600);function hiB(x){S.seqHi=x;const b=$(`[data-seq-btn="${x}"]`);if(b){b.style.background=`radial-gradient(circle,${C.glow},${C.rust})`;b.style.borderColor=C.glow;b.style.boxShadow=`0 0 18px ${C.glow},inset 0 0 10px rgba(255,215,0,0.3)`;const s=b.querySelector("circle");if(s){s.setAttribute("fill",C.glow);s.setAttribute("opacity","1");}}}function unHi(){$$("[data-seq-btn]").forEach(b=>{b.style.background=`linear-gradient(145deg,${C.metal},${C.darkMetal})`;b.style.borderColor=C.darkRust;b.style.boxShadow=`inset 0 2px 8px rgba(0,0,0,0.5)`;const s=b.querySelector("circle");if(s){s.setAttribute("fill",C.rivet);s.setAttribute("opacity","0.35");}});}}
+function seqClick(i){if(S.seqPhase!=="input"||S.seqDone)return;const seq=SEQ_LEVELS[Math.min(S.pLvl[2],2)].seq,st=S.seqInput.length;if(i===seq[st]){playSound("click");haptic(15);const b=$(`[data-seq-btn="${i}"]`);if(b){b.style.background=`radial-gradient(circle,${C.glow},${C.rust})`;b.style.borderColor=C.glow;b.style.boxShadow=`0 0 18px ${C.glow},inset 0 0 10px rgba(255,215,0,0.3)`;const s=b.querySelector("circle");if(s){s.setAttribute("fill",C.glow);s.setAttribute("opacity","1");}setTimeout(()=>{b.style.background=`linear-gradient(145deg,${C.metal},${C.darkMetal})`;b.style.borderColor=C.darkRust;b.style.boxShadow=`inset 0 2px 8px rgba(0,0,0,0.5)`;if(s){s.setAttribute("fill",C.rivet);s.setAttribute("opacity","0.35");}},200);}S.seqInput.push(i);if(S.seqInput.length===seq.length){S.seqDone=true;S.seqPhase="done";playSound("success");haptic(80);setT(()=>render(),100);setT(()=>{advancePuzzle(2);autoAdvance(2);},1600);}}else{S.seqFail=true;playSound("fail");haptic([50,30,50]);
+    /* Targeted fail update — no full re-render to avoid blink */
+    const phEl=$("[data-seq-phase]");if(phEl)phEl.innerHTML=`<svg width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="10" fill="none" stroke="${C.fail}" stroke-width="2"/><path d="M10 10l8 8m0-8l-8 8" stroke="${C.fail}" stroke-width="2.5"/></svg>`;
+    setT(()=>playSeq(),1200);}}
+
+/* Maze */
+function initMazeLevel(lvlIdx){
+  const lvl=MAZE_LEVELS[lvlIdx];
+  mazeGrid=generateMaze(lvl.rows,lvl.cols,lvl.deadEndExtend||0);
+  mazeRows=lvl.rows;mazeCols=lvl.cols;
+  mazeExit=[lvl.rows-1,lvl.cols-1];
+  /* Place key at farthest cell from exit for maximum backtracking */
+  mazeKeyPos=findFarthest(mazeGrid,lvl.rows,lvl.cols,mazeExit[0],mazeExit[1]);
+  /* Ensure key isn't at start or exit */
+  if((mazeKeyPos[0]===0&&mazeKeyPos[1]===0)||(mazeKeyPos[0]===mazeExit[0]&&mazeKeyPos[1]===mazeExit[1]))mazeKeyPos=[Math.floor(lvl.rows/2),Math.floor(lvl.cols/2)];
+  S.mazePhase="navigate";S.mazeRobot={r:0,c:0};
+  S.mazeHasKey=false;S.mazeKeyVisible=false;S.mazeDoorOpen=true;S.mazeAnimating=false;
+  S.mazeVisited=new Set();
+  revealCells(0,0,lvl.vis);
+}
+function openMaze(){
+  S.mazeLvl=0;initMazeLevel(0);S.screen="maze";render();
+}
+function showMazeHint(){
+  const rob=document.getElementById("maze-robot");if(!rob)return;
+  const b=document.createElement("div");
+  b.style.cssText="position:absolute;top:-56px;left:50%;transform:translateX(-50%);z-index:15;animation:hintFade 3s ease forwards;pointer-events:none";
+  b.innerHTML=`<svg width="90" height="56" viewBox="0 0 90 56">
+    <rect x="2" y="2" width="86" height="42" rx="16" fill="rgba(60,50,35,0.92)" stroke="${C.brass}" stroke-width="1.5"/>
+    <circle cx="45" cy="48" r="3" fill="rgba(60,50,35,0.85)" stroke="${C.brass}" stroke-width="0.8"/>
+    <!-- Frame 1: key + ? -->
+    <g><animate attributeName="opacity" values="1;1;0;0;0;0" dur="3s" fill="freeze"/>
+      <circle cx="30" cy="20" r="5" fill="none" stroke="${C.glow}" stroke-width="1.8"/>
+      <line x1="35" y1="20" x2="44" y2="20" stroke="${C.glow}" stroke-width="1.8" stroke-linecap="round"/>
+      <line x1="41" y1="20" x2="41" y2="24" stroke="${C.glow}" stroke-width="1.5"/>
+      <text x="58" y="28" font-size="18" fill="${C.brass}" font-family="serif" font-weight="bold">?</text>
+    </g>
+    <!-- Frame 2: key → door -->
+    <g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0;0" dur="3s" fill="freeze"/>
+      <circle cx="22" cy="20" r="4" fill="none" stroke="${C.glow}" stroke-width="1.5"/>
+      <line x1="26" y1="20" x2="33" y2="20" stroke="${C.glow}" stroke-width="1.5"/>
+      <path d="M40 20l6 0" stroke="${C.brass}" stroke-width="1.5" stroke-dasharray="2,2"><animate attributeName="stroke-dashoffset" values="4;0" dur="0.5s" repeatCount="indefinite"/></path>
+      <path d="M52 28V16Q52 10 58 10Q64 10 64 16V28" fill="none" stroke="${C.brass}" stroke-width="1.5"/>
+      <path d="M54 28V17Q54 12 58 12Q62 12 62 17V28Z" fill="${C.copper}"/>
+    </g>
+    <!-- Frame 3: door opens with glow -->
+    <g opacity="0"><animate attributeName="opacity" values="0;0;0;0;1;1" dur="3s" fill="freeze"/>
+      <path d="M36 30V16Q36 8 45 8Q54 8 54 16V30" fill="none" stroke="${C.brass}" stroke-width="1.8"/>
+      <rect x="38" y="16" width="14" height="14" rx="1" fill="${C.glow}" opacity="0.3"><animate attributeName="opacity" values="0.2;0.5;0.2" dur="0.8s" repeatCount="indefinite"/></rect>
+      <circle cx="45" cy="22" r="6" fill="${C.glow}" opacity="0.15"><animate attributeName="r" values="4;8;4" dur="1s" repeatCount="indefinite"/></circle>
+    </g>
+  </svg>`;
+  rob.appendChild(b);
+}
+function mazeMove(dr,dc){
+  if(S.mazeAnimating||S.mazePhase==="complete"||S.mazePhase==="door_closing")return;
+  const lvl=MAZE_LEVELS[S.mazeLvl];
+  const{r,c}=S.mazeRobot;const nr=r+dr,nc=c+dc;
+  if(nr<0||nr>=lvl.rows||nc<0||nc>=lvl.cols)return;
+  const wb=dr===-1?W_T:dr===1?W_B:dc===-1?W_L:W_R;
+  if(mazeGrid[r][c]&wb){playSound("wall");haptic(15);return;}
+  playSound("click");haptic(10);
+  S.mazeAnimating=true;
+  /* Update state immediately — robot position is authoritative */
+  S.mazeRobot={r:nr,c:nc};
+  revealCells(nr,nc,lvl.vis);
+  /* GPU-composited move via transform */
+  const cs=getMazeCS();
+  const rob=document.getElementById("maze-robot");
+  if(rob)rob.style.transform=`translate3d(${nc*cs}px,${nr*cs}px,0)`;
+  /* Check phase triggers synchronously so input feels instant */
+  let phaseChange=false;
+  if(nr===mazeExit[0]&&nc===mazeExit[1]){
+    if(S.mazePhase==="navigate"){
+      S.mazePhase="door_closing";S.mazeDoorOpen=false;phaseChange=true;
+      playSound("door");haptic([40,20,40]);
+      requestAnimationFrame(()=>{
+        updateMazeFog();
+        const door=document.getElementById("maze-door");
+        if(door)door.parentElement.style.animation="shake 0.4s ease";
+        showMazeHint();
+      });
+      setT(()=>{S.mazeKeyVisible=true;S.mazePhase="find_key";S.mazeAnimating=false;renderMaze();},3200);
+      return;
+    }
+    if(S.mazePhase==="has_key"){
+      playSound("success");haptic(80);phaseChange=true;
+      setT(()=>{
+        if(S.mazeLvl<MAZE_LEVELS.length-1){S.mazeLvl++;initMazeLevel(S.mazeLvl);saveProgress();renderMaze();}
+        else{S.mazePhase="complete";S.mazeComplete=true;saveProgress();renderMaze();}
+      },120);
+      return;
+    }
+  }
+  if(S.mazeKeyVisible&&nr===mazeKeyPos[0]&&nc===mazeKeyPos[1]){
+    S.mazeHasKey=true;S.mazeKeyVisible=false;S.mazeDoorOpen=true;S.mazePhase="has_key";
+    playSound("key");haptic(25);phaseChange=true;
+    setT(()=>{S.mazeAnimating=false;renderMaze();},120);
+    return;
+  }
+  /* Fog update deferred to next frame — doesn't block input */
+  requestAnimationFrame(()=>updateMazeFog());
+  /* Unlock input after transition completes (100ms matches CSS) */
+  setTimeout(()=>{S.mazeAnimating=false;},100);
+}
+/* Skip all 3 mini-puzzles for testing — set TEST_SKIP=false for production */
+const TEST_SKIP=true;
+function skipPuzzles(){
+  S.pLvl=[3,3,3];S.progress=9;S.safeOpen=true;S.screen="main";render();
+}
+
+/* ── Event Delegation ── */
+document.addEventListener("click",function(e){
+  const el=e.target.closest("[data-action]");if(!el)return;
+  const a=el.dataset.action;
+  switch(a){
+    case"open-pipe":openPipe();break;
+    case"open-gear":openGear();break;
+    case"open-seq":openSeq();break;
+    case"open-maze":openMaze();break;
+    case"back":goBack();break;
+    case"rotate-pipe":rotatePipe(+el.dataset.r,+el.dataset.c);break;
+    case"click-gear":clickGearAction(+el.dataset.i);break;
+    case"seq-click":seqClick(+el.dataset.i);break;
+    case"replay-seq":playSeq();break;
+    case"skip-puzzles":skipPuzzles();break;
+    case"maze-cell":
+      const tr=+el.dataset.r,tc=+el.dataset.c;
+      const dr=tr-S.mazeRobot.r,dc=tc-S.mazeRobot.c;
+      if(Math.abs(dr)+Math.abs(dc)===1)mazeMove(dr,dc);
+      break;
+  }
+});
+
+/* Arrow keys for maze — supports key repeat */
+document.addEventListener("keydown",function(e){
+  if(S.screen!=="maze")return;
+  const dirs={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1],w:[-1,0],s:[1,0],a:[0,-1],d:[0,1]};
+  if(dirs[e.key]){e.preventDefault();mazeMove(...dirs[e.key]);}
+});
+
+/* Swipe for maze — detects on touchmove for faster response */
+let touchSt=null,touchMoved=false;
+document.addEventListener("touchstart",function(e){if(S.screen==="maze"){e.preventDefault();touchSt={x:e.touches[0].clientX,y:e.touches[0].clientY};touchMoved=false;}},{passive:false});
+document.addEventListener("touchmove",function(e){
+  if(!touchSt||S.screen!=="maze"||touchMoved)return;
+  e.preventDefault();
+  const dx=e.touches[0].clientX-touchSt.x,dy=e.touches[0].clientY-touchSt.y;
+  if(Math.max(Math.abs(dx),Math.abs(dy))<18)return;
+  touchMoved=true;
+  if(Math.abs(dx)>Math.abs(dy))mazeMove(0,dx>0?1:-1);else mazeMove(dy>0?1:-1,0);
+  touchSt={x:e.touches[0].clientX,y:e.touches[0].clientY};touchMoved=false;
+},{passive:false});
+document.addEventListener("touchend",function(e){
+  if(!touchSt||S.screen!=="maze")return;
+  e.preventDefault();
+  if(!touchMoved){/* Tap — handle as cell click via delegation */}
+  touchSt=null;touchMoved=false;
+});
+
+/* ── Render Router ── */
+function render(){
+  switch(S.screen){
+    case"main":renderMain();break;case"pipe":renderPipe();break;
+    case"gear":renderGear();break;case"seq":renderSeq();break;
+    case"maze":renderMaze();break;
+  }
+}
+render();
+/* Persistent dust particles — created once, never reset by re-renders */
+(function(){const d=document.createElement("div");d.id="dust-layer";d.style.cssText="position:fixed;inset:0;pointer-events:none;z-index:1";let h="";for(let i=0;i<6;i++){const sz=2+Math.random()*2,x=10+Math.random()*80,dur=10+Math.random()*8,del=Math.random()*10;h+=`<div class="dust" style="width:${sz}px;height:${sz}px;left:${x}%;--dur:${dur}s;--delay:${del}s"></div>`;}d.innerHTML=h;document.body.appendChild(d);})();
+})();
+</script>
+</body>
+</html>
